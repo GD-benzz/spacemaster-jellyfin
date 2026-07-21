@@ -1,10 +1,16 @@
 # ===== 闭源算法引擎（源码与二进制均不进公开仓）=====
 # 源码：本地开发/自用时存在，编译成二进制后分发，绝不提交
 engine_core.py
-# 编译产物（PyInstaller 出，Linux 平台分发用）
+# 编译产物（Nuitka 原生编译出，Linux 平台分发用）
 sm_dsp_engine
 sm_dsp_engine_*
 *.bin
+
+# Nuitka 本地构建残留（不进仓）
+engine_core.build/
+engine_core.dist/
+engine_core.onefile-build/
+.build-venv/
 
 # ===== Python 杂物 =====
 __pycache__/

@@ -100,9 +100,9 @@ Open `http://<HOST_IP>:8777`, enter your room dimensions, adjust the sliders, an
 You build the image **once** with the engine baked in, push it to a public registry, and end users just `docker compose up`. You never hand-deliver a binary.
 
 ```bash
-# 1. Compile the engine on a Linux x86_64 host (PyInstaller is NOT cross-platform):
-#    pyinstaller --onefile engine_core.py -n sm_dsp_engine
-#    -> produces ./dist/sm_dsp_engine ; copy it next to the Dockerfile as ./sm_dsp_engine
+# 1. Compile the engine on a Linux x86_64 host (Nuitka output is NOT cross-platform):
+#    bash build_engine.sh
+#    -> produces ./sm_dsp_engine (native machine code, not Python bytecode)
 
 # 2. Build the image (Dockerfile auto-copies ./sm_dsp_engine into the image):
 docker build -t ghcr.io/gd-benzz/spacemaster-jellyfin:latest .
@@ -209,9 +209,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now peq-console.service
 你只需**构建一次**（把引擎烤进镜像），推到公开镜像仓库，终端用户 `docker compose up` 即可。你永远不用手动发二进制。
 
 ```bash
-# 1. 在 Linux x86_64 主机上编译引擎（PyInstaller 不跨平台）：
-#    pyinstaller --onefile engine_core.py -n sm_dsp_engine
-#    -> 生成 ./dist/sm_dsp_engine ；把它拷到 Dockerfile 同目录，命名 ./sm_dsp_engine
+# 1. 在 Linux x86_64 主机上编译引擎（Nuitka 产物不跨平台）：
+#    bash build_engine.sh
+#    -> 生成 ./sm_dsp_engine（原生机器码，已非 Python 字节码，反编译难度高）
 
 # 2. 构建镜像（Dockerfile 会自动把 ./sm_dsp_engine 烤进镜像）：
 docker build -t ghcr.io/gd-benzz/spacemaster-jellyfin:latest .

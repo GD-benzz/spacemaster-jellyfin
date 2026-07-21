@@ -799,7 +799,6 @@ HTML_PAGE = r"""<!doctype html>
 </div>
 
 <script>
-const C = 343;
 const DELAY_CHANNELS = {tv:['FL','FR'], ht21:['FL','FR','LFE'], ht51:['FL','FR','FC','SL','SR','LFE']};
 const CH_LABEL = {FL:'左声道', FR:'右声道', FC:'中置', SL:'左环绕', SR:'右环绕', LFE:'低音炮'};
 let delayManualState = {FL:0, FR:0, FC:0, SL:0, SR:0, LFE:0};
