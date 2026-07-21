@@ -1,17 +1,19 @@
 
 services:
   jellyfin-sm:
-    image: ghcr.io/gd-benzz/spacemaster-jellyfin:latest
-
+    # 官方 Jellyfin 镜像，由用户自己从 Docker Hub 拉取（不捆绑在我们的镜像里）
+    image: jellyfin/jellyfin:latest
 
     container_name: jellyfin-sm
     restart: unless-stopped
+    # 用我们的 setup.sh 当入口点：启动时把 ffmpeg 换成 DSP wrapper，再正常起 Jellyfin
+    entrypoint: ["/opt/spacemaster/setup.sh"]
     ports:
       - "8096:8096"
     volumes:
       - ./config:/config
       - ./cache:/cache
+      # 宿主 /opt/spacemaster 内含：sm_dsp_engine(二进制) + sm_wrapper.sh + 运行时配置(peq_af.txt 等)
       - /opt/spacemaster:/opt/spacemaster
     environment:
       - SM_DOWNMIX=1
-
