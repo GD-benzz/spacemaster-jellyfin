@@ -1,46 +1,17 @@
-# 空间大师 · Jellyfin 部署 / SpaceMaster · Jellyfin deployment
-# ===================================================================
-# 终端用户（End users）：直接拉取预构建公开镜像，无需构建、无需任何算法文件。
-#   docker compose up -d
-# 镜像里已内置编译好的闭源算法二进制 sm_dsp_engine，源码不在其中。
-#
-# The prebuilt public image already contains the compiled closed-source
-# engine (sm_dsp_engine). You do NOT need to build anything or obtain any
-# extra file. Just run `docker compose up -d`.
-#
-# 维护者（Maintainer）构建并发布镜像的方式见 README / 开源说明.md。
-# ===================================================================
 
 services:
   jellyfin-sm:
-    # 终端用户：拉取维护者发布的公开镜像（推荐）
-    # End users: pull the maintainer's prebuilt public image (recommended)
     image: ghcr.io/gd-benzz/spacemaster-jellyfin:latest
 
-    # 维护者自行构建时，取消下面 build 段的注释（并可注释掉上面的 image 行）
-    # Maintainer building locally: uncomment the build block below
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    #   args:
-    #     # 闭源二进制下载地址；构建时烤入镜像 / URL to bake the closed binary in
-    #     SM_ENGINE_URL: ""
 
     container_name: jellyfin-sm
     restart: unless-stopped
     ports:
-      - "8096:8096"          # Jellyfin 主端口 / Jellyfin main port
+      - "8096:8096"
     volumes:
       - ./config:/config
       - ./cache:/cache
-      # 宿主 /opt/spacemaster：控制台写的 EQ/延时/平衡配置文件
-      # Host /opt/spacemaster: EQ/delay/balance config files written by the console
       - /opt/spacemaster:/opt/spacemaster
     environment:
-      # 下混模式 / Downmix mode:
-      #   0 = 保留多声道只注EQ / keep multichannel, EQ only
-      #   1 = pan 下混立体声 / downmix to stereo
-      #   2 = 真实 2.1 / true 2.1
       - SM_DOWNMIX=1
-      # 其它 SM_* 参数可用 /opt/spacemaster/downmix.env 覆盖，无需重建镜像
-      # Other SM_* params can be overridden via /opt/spacemaster/downmix.env
+

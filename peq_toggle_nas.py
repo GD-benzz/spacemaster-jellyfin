@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-# 空间大师 · 统一控制台 (8777)
-# 合并: PEQ 开关 + 调整页面(房间→模态生成器) + 下混参数
-# 纯标准库, 无外部依赖; wrapper 热读 /opt/spacemaster/peq_af.txt
-# 生成算法(房间→PEQ / 几何→延时 / 下混矩阵)已抽离到【闭源引擎 engine_core / sm_dsp_engine】，
-#   服务端经 engine_runtime 调用，本文件【不含任何公式】。
-#   本文件供【私有 NAS】使用, 勿直接塞进公开 docker 镜像/仓库(改用 Worker 版 peq-config)。
 import json, os, shutil, time, threading
 import engine_runtime
 import urllib.request, urllib.error, urllib.parse
@@ -19,8 +13,6 @@ PEQ_SDELAY  = os.environ.get("PEQ_SDELAY", "/opt/spacemaster/peq_sdelay.txt")
 DOWNMIX   = os.environ.get("DOWNMIX",  "/opt/spacemaster/downmix.env")
 PORT      = int(os.environ.get("PORT", "8777"))
 
-# 本房间手调终版预设(2026-07-16 用户手动微调最佳, 电视2喇叭) — 仅结果曲线, 非算法
-# 生成器默认输入(用户房间 + 已调滑块)
 GEN_DEFAULT = {"L":3.1,"W":4.4,"H":2.8,"sys":"tv","low":0.0,"mid":0.7,"hi":1.5,
                "delayOn":False,"tvW":1.2,"dist":2.5,"offX":0.0,"tvH":0.9,"earH":1.1,
                "balance":0.0,
@@ -69,7 +61,7 @@ def write_peq(bands):
             parts.append("equalizer=f=%s:g=%s:w=%s:t=q" % (b['f'], b['g'], b['Q']))
     s = ",".join(parts)
     open(PEQ_AF, 'w').write(s)
-    try:  # 兼容旧机制(wrapper 实际只读 peq_af.txt)
+    try:
         json.dump({"peq": bands, "meta": {}}, open(PEQ_JSON, 'w'))
     except Exception:
         pass
@@ -124,20 +116,12 @@ def sync_downmix_from_sys(gen):
     write_downmix({'SM_DOWNMIX': dm})
 
 
-# ============ 延时校准（adelay 字符串生成，移植演示版 perChannelDelays）============
-# 每模式输出声道（决定 adelay delays 的通道数与顺序）：
-#   tv   -> 2.0 (FL,FR)             电视内置/电脑自带音箱，下混立体声
-#   ht21 -> 2.1 (FL,FR,LFE)         真实2.1（L+R+LFE独立）
-#   ht51 -> 5.1 (FL,FR,FC,SL,SR,LFE)
-# MVP 仅 tv 启用；5.1/2.1 延时后续开放（compute_delay_string 对非 tv 仍返回 None）。
 DELAY_CHANNELS = {
     'tv':   ['FL', 'FR'],
     'ht21': ['FL', 'FR', 'LFE'],
     'ht51': ['FL', 'FR', 'FC', 'SL', 'SR', 'LFE'],
 }
 
-# auto_baseline 已移入闭源引擎 engine_core（几何走时差算法）。
-# 此处仅通过 engine_runtime 调用，本文件不含公式。
 
 def compute_delay_string(gen):
     """算 adelay 滤镜字符串。仅 tv 支持；其余返回 None。
@@ -149,7 +133,7 @@ def compute_delay_string(gen):
         return None
     sys_t = (gen or {}).get('sys', 'tv')
     if sys_t != 'tv':
-        return None  # 5.1/2.1 延时后续开放
+        return None
     chans = DELAY_CHANNELS.get(sys_t, ['FL', 'FR'])
     auto = engine_runtime.auto_baseline(gen)
     man = gen.get('delayManual') or {}
@@ -158,7 +142,7 @@ def compute_delay_string(gen):
     except (TypeError, ValueError):
         return None
     if all(t == 0 for t in total):
-        return None  # 无实际延迟不写文件，避免误触发重编码
+        return None
     return "adelay=delays=" + "|".join(str(t) for t in total)
 
 
@@ -175,9 +159,9 @@ def compute_balance_string(gen):
         b = float((gen or {}).get('balance', 0) or 0)
     except (TypeError, ValueError):
         b = 0
-    b = max(-100.0, min(100.0, b)) / 100.0   # 归一化到 -1..1
+    b = max(-100.0, min(100.0, b)) / 100.0
     if abs(b) < 0.005:
-        return None   # 居中：不启用平衡（走透传，不强制重编码）
+        return None
     gL = round(1.0 - max(0.0, b), 4)
     gR = round(1.0 - max(0.0, -b), 4)
     return "%.4f|%.4f" % (gL, gR)
@@ -207,7 +191,6 @@ def write_surround_delay(s):
     open(PEQ_SDELAY, 'w').write((s or '').strip() + "\n")
 
 
-# ============ Jellyfin 连接（用于「应用」）============
 def read_jellyfin_cfg():
     p = os.environ.get("JELLYFIN_CFG", "/opt/spacemaster/jellyfin.json")
     try:
@@ -276,9 +259,6 @@ def clear_transcode_cache(cfg=None):
                 cleared.append(d)
             except Exception:
                 pass
-    # 容器内转码缓存：peq_toggle.py 在宿主机跑，但 Jellyfin 在 Docker 容器内，
-    # 转码缓存在容器 /cache/transcodes，宿主机 os.path.isdir 判断不到 → 必须用 docker exec 清。
-    # 不清的话 Stop+Play 后 Jellyfin 复用旧 HLS 段，新 peq_af.txt 不生效。
     try:
         import subprocess
         cid = subprocess.check_output(
@@ -379,7 +359,6 @@ def _jellyfin_restart_reload(cfg, clear_cache=True):
       - 不重启容器，Jellyfin 主进程 / 其他会话 / ws 连接全不受影响；
       - 客户端留在播放器内，仅一次极短重协商（约 1~5s），无黑屏或秒切；
       - 若个别客户端未自动续播，拖一下进度条即秒切（与旧方案等效，但不打断服务器）。"""
-    # 解析容器
     try:
         cid = _sp.check_output(
             ["docker", "ps", "--filter", "name=jellyfin", "--format", "{{.ID}}"],
@@ -388,7 +367,6 @@ def _jellyfin_restart_reload(cfg, clear_cache=True):
         cid = ""
     if not cid:
         cid = cfg.get("container") or "jellyfin-sm"
-    # 1) 拆当前转码会话（直连 8097，绕过 8098 proxy）
     try:
         sessions = _jf_req(cfg, "/Sessions")
     except Exception:
@@ -404,9 +382,7 @@ def _jellyfin_restart_reload(cfg, clear_cache=True):
         print("[replay] DELETE ActiveEncodings 已发 (code=%s, 拆旧转码会话)" % code, flush=True)
     else:
         print("[replay] 未取到活跃会话 DeviceId/PlaySessionId，跳过 DELETE", flush=True)
-    # 等 Jellyfin 完成拆流（避免我们清缓存时它还在写）
     time.sleep(1.0)
-    # 2) 清转码缓存（逼重新生成分片，带新 EQ）
     if clear_cache and cid:
         try:
             _sp.call(["docker", "exec", cid, "sh", "-c",
@@ -415,7 +391,6 @@ def _jellyfin_restart_reload(cfg, clear_cache=True):
             print("[replay] 已清 /cache/transcodes/*（旧分片移除）", flush=True)
         except Exception:
             pass
-    # 3) 杀残留 ffmpeg（容器内无 pkill，用 pgrep+kill）
     _kill_ffmpeg(cid)
     return True, "已温和重载（拆旧转码+清缓存，不重启容器）；客户端续播即从新位置应用新 EQ"
 
@@ -428,7 +403,7 @@ def _jellyfin_seek_reload(cfg, session):
     → 反复 404 → 卡→拖条续一会→又 404 的死循环（TV 端 2026-07-20 实测确认）。"""
     sid = session.get('Id') or ''
     pos = (session.get('PlayState') or {}).get('PositionTicks') or 0
-    new_pos = pos + 10000000  # 向前 1s（10^7 ticks）：必须真移动才触发重转码
+    new_pos = pos + 10000000
     body = {"Command": "Seek", "SeekPositionTicks": new_pos}
     try:
         _jf_req(cfg, "/Sessions/%s/Playing/PlayState" % urllib.parse.quote(sid, safe=""),
@@ -466,7 +441,6 @@ def replay_active_session(cfg, clear_cache=True):
         if s.get('NowPlayingItem') and s.get('IsActive'):
             if cur is None:
                 cur = s
-            # 多设备同时播放时，优先选可控 Web 客户端
             if s.get('SupportsMediaControl') and s.get('Id'):
                 cur_web = s
     if cur_web:
@@ -487,25 +461,15 @@ def replay_active_session(cfg, clear_cache=True):
     ms = item.get('MediaSources') or []
     if ms:
         media_src = (ms[0] or {}).get('Id', '') or ''
-    # 按客户端能力选择重载方式（详见 _jellyfin_seek_reload / TV 分支注释）：
     if cur.get('SupportsMediaControl') and cur.get('Id'):
-        # ① 可控 Web 客户端：远程 Seek 无缝重载（不拆流）
         ok, msg = _jellyfin_seek_reload(cfg, cur)
         return (ok, msg, "web")
-    # ② TV / 不可控客户端：不做任何拆流，提示用户拖进度条
     return (True,
             "EQ 已保存。TV 端请在播放器里把进度条拖动 1~2 秒即可听到新效果"
             "（TV 应用不支持远程重载；此方式不打断播放、不会反复卡）。",
             "tv")
 
 
-# ============ 重载状态管理（按钮触发，DELETE+删目录 黑屏重载）============
-# 设计变更（2026-07-18）：Android TV SupportsMediaControl=false，
-# Stop/Play 远程命令对 TV 完全无效 → 旧 Stop+Play 方案 ffmpeg 永不重启 → 新 EQ 不生效。
-# 修正（2026-07-18 中午）：之前误判 DELETE ActiveEncodings 会 404 不重启，实际它返回 204
-# = 干净拆除转码会话（杀 ffmpeg+清内存+manifest失效）。配合删整个转码目录，
-# TV 重新加载 manifest = 黑屏（与 Jellyfin 改画质同内核），全新转码重读新 peq_af.txt。
-# 状态流转：idle → loading(正在重载音效) → loaded(新音效已生效) / error
 import subprocess as _sp
 
 _replay_state = {"status": "idle", "msg": "", "started_at": 0.0}
@@ -521,7 +485,6 @@ def _detect_transcode_started(cfg, timeout=90, grace=6.0):
             stderr=_sp.DEVNULL).decode().strip().split("\n")[0].strip()
         if not cid:
             return False
-        # 先等 ffmpeg 死透（pkill -9 / DELETE 后进程不会立刻消失）
         time.sleep(1.5)
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -564,7 +527,6 @@ def _do_replay(cfg):
         print("[replay] 失败: %s (t=%.1fs)" % (msg, time.time() - t0), flush=True)
         return
     print("[replay] 已触发温和重载(kind=%s) (t=%.1fs)" % (kind, time.time() - t0), flush=True)
-    # 温和重载约 1~5s 生效，不在此阻塞等待；前端提示"客户端续播即生效"
     with _replay_lock:
         _replay_state["status"] = "loaded"
         _replay_state["msg"] = msg + "（客户端续播即生效，约几秒）"
@@ -577,8 +539,6 @@ def trigger_replay(cfg):
         return False, "未配置 Jellyfin 连接"
     with _replay_lock:
         if _replay_state["status"] == "loading":
-            # 陈旧保护：若上一次 loading 起始已超 120s 仍没结束，视为卡死，允许重新触发，
-            # 避免"应用"被永久阻塞（如 Web 端 Play 未自动续播导致检测空等）。
             if time.time() - _replay_state.get("started_at", 0) < 120:
                 return False, "正在重载中，请稍候"
     threading.Thread(target=_do_replay, args=(cfg,), daemon=True).start()
@@ -622,7 +582,6 @@ def _detect_double_eq_risk(cfg, use_cache=True):
                 "user": user or "未知用户",
             })
     except Exception:
-        # 检测失败不阻塞：返回空（视为无风险），不影响控制台其他功能
         result = {"windows_streaming": [], "advice": ""}
     if result["windows_streaming"]:
         names = "、".join("%s（%s）" % (c["client"], c["device"]) for c in result["windows_streaming"])
@@ -657,7 +616,7 @@ HTML_PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>空间大师 · 控制台 (8777)</title>
 <style>
-  :root{--bg:#0f1419;--card:#1a212b;--ink:#e6edf3;--mut:#8b97a6;--acc:#3fb950;--off:#888780;--low:#f0883e;--mid:#58a6ff;--hi:#bc8cff;--comp:#3fb950;--warn:#d29922}
+  :root{--bg:
   *{box-sizing:border-box}
   body{font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px;max-width:880px;margin:20px auto}
   h1{font-size:20px;margin:0 0 2px}
@@ -665,8 +624,8 @@ HTML_PAGE = r"""<!doctype html>
   .card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:14px}
   .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
   label{font-size:12px;color:var(--mut);display:block;margin-bottom:4px}
-  input[type=number]{width:84px;padding:8px;border-radius:8px;border:1px solid #2d3744;background:#0d1117;color:var(--ink);font-size:15px}
-  select{width:280px;padding:8px;border-radius:8px;border:1px solid #2d3744;background:#0d1117;color:var(--ink);font-size:14px}
+  input[type=number]{width:84px;padding:8px;border-radius:8px;border:1px solid
+  select{width:280px;padding:8px;border-radius:8px;border:1px solid
   .slider{margin:14px 0}
   .slider .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
   .slider .val{color:var(--acc);font-variant-numeric:tabular-nums}
@@ -674,25 +633,25 @@ HTML_PAGE = r"""<!doctype html>
   .bass input[type=range]{accent-color:var(--low)}
   .mid input[type=range]{accent-color:var(--mid)}
   .hi input[type=range]{accent-color:var(--hi)}
-  svg{width:100%;height:200px;background:#0d1117;border-radius:8px;display:block}
+  svg{width:100%;height:200px;background:
   .seg{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut);line-height:1.7;max-height:170px;overflow:auto;white-space:pre-wrap}
-  textarea{width:100%;height:70px;background:#0d1117;color:var(--acc);border:1px solid #2d3744;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px}
-  button{background:var(--acc);color:#04210d;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin:4px 6px 4px 0}
-  button.sec{background:#21262d;color:var(--ink)}
-  button.off{background:var(--off);color:#fff}
+  textarea{width:100%;height:70px;background:
+  button{background:var(--acc);color:
+  button.sec{background:
+  button.off{background:var(--off);color:
   .toggle{position:relative;width:52px;height:28px;border-radius:14px;cursor:pointer;transition:background .2s;flex:0 0 auto}
-  .toggle .knob{position:absolute;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+  .toggle .knob{position:absolute;top:3px;width:22px;height:22px;border-radius:50%;background:
   .toggle.on{background:var(--acc)}
   .toggle.off{background:var(--off)}
   .toggle.on .knob{left:3px}
   .toggle.off .knob{left:27px}
   .note{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}
-  .pill{display:inline-block;padding:3px 12px;border-radius:20px;font-size:13px;font-weight:600;background:#21262d}
-  .pill.on{background:var(--acc);color:#04210d}
-  .pill.off{background:var(--off);color:#fff}
+  .pill{display:inline-block;padding:3px 12px;border-radius:20px;font-size:13px;font-weight:600;background:
+  .pill.on{background:var(--acc);color:
+  .pill.off{background:var(--off);color:
   .badge{font-size:11px;color:var(--mut);margin-left:8px}
-  .err{color:#f85149;font-size:12px;margin-top:6px;min-height:14px}
-  .canvas-wrap{background:#0d1320;border:1px solid #2a3a52;border-radius:8px;padding:6px;margin:6px 0}
+  .err{color:
+  .canvas-wrap{background:
   .canvas-wrap canvas{width:100%;height:auto;display:block;border-radius:4px;cursor:crosshair;touch-action:none}
   .canvas-title{font-size:13px;margin:12px 0 2px;color:var(--ink)}
 </style>
@@ -802,9 +761,7 @@ HTML_PAGE = r"""<!doctype html>
 const DELAY_CHANNELS = {tv:['FL','FR'], ht21:['FL','FR','LFE'], ht51:['FL','FR','FC','SL','SR','LFE']};
 const CH_LABEL = {FL:'左声道', FR:'右声道', FC:'中置', SL:'左环绕', SR:'右环绕', LFE:'低音炮'};
 let delayManualState = {FL:0, FR:0, FC:0, SL:0, SR:0, LFE:0};
-// ===== 房间→PEQ / 几何→延时 算法已移入闭源引擎（engine_core / sm_dsp_engine）=====
-// 前端只把原始输入发给 /api/compute，拿回算好的 bands + delays，绝不本地算公式。
-let currentDelays = {};   // 来自引擎的每声道自动基线延时(ms)
+let currentDelays = {};
 async function computeAll(){
   const gen = genInputs();
   try{
@@ -816,13 +773,11 @@ async function computeAll(){
     renderDelayReadout();
   }catch(e){ console.error('compute failed', e); }
 }
-// build() 保留为兼容名，内部走引擎计算
 async function build(){ await computeAll(); }
 function renderViz(bands){
   const W=820,H=220,m=34,fMin=20,fMax=20000,gMin=-12,gMax=14,Fs=48000;
   const lx=f=>(Math.log10(f)-Math.log10(fMin))/(Math.log10(fMax)-Math.log10(fMin))*(W-2*m)+m;
   const ly=g=>m+(gMax-g)/(gMax-gMin)*(H-2*m);
-  // 构造每个 band 的 peaking biquad（与 ffmpeg equalizer t=q 一致）
   const bqs=bands.map(b=>{
     const A=Math.pow(10,b.g/40), w0=2*Math.PI*b.f/Fs, cw=Math.cos(w0), sw=Math.sin(w0);
     if(b.t==="lowshelf"){
@@ -868,9 +823,7 @@ function genInputs(){
     surroundDelay:+surroundDelay_.value,
     delayManual:{...delayManualState}};
 }
-// 几何走时差已移入闭源引擎（auto_baseline）。前端用 currentDelays（来自 /api/compute）。
 
-// ============ 平面图（电视内置音箱，移植自演示版 drawPlan；侧面图已按需求取消）============
 function drawPlanTV(){
   const cv=plan_; if(!cv) return;
   const x=cv.getContext('2d'), W=cv.width, H=cv.height, pad=38;
@@ -880,20 +833,17 @@ function drawPlanTV(){
     x.fillText('仅电视内置/电脑自带音箱支持延时校准', W/2, H/2);
     return;
   }
-  // 实际房间地面尺寸：W=前墙宽(电视所在墙)，L=进深(前→后)
   const roomW=Math.max(0.1,(+W_.value)||4.4);
   const roomD=Math.max(0.1,(+L_.value)||3.1);
   const tvW=+tvW_.value, dist=+dist_.value, offX=+offX_.value, tvH=+tvH_.value, earH=+earH_.value;
-  // 统一比例尺(px/米)，保持房间真实长宽比，居中放置
   const ux=W-2*pad, uy=H-2*pad;
   const scale=Math.min(ux/roomW, uy/roomD);
   const dw=roomW*scale, dh=roomD*scale;
   const ox=pad+(ux-dw)/2, oy=pad+(uy-dh)/2;
-  const PX=vx=>ox+(vx+roomW/2)/roomW*dw;   // 水平：-roomW/2..roomW/2（左负右正）
-  const PY=vy=>oy+vy/roomD*dh;              // 深度：0(前墙)..roomD(后墙)
+  const PX=vx=>ox+(vx+roomW/2)/roomW*dw;
+  const PY=vy=>oy+vy/roomD*dh;
   x.fillStyle='#0d1320'; x.strokeStyle='#2a3a52'; x.lineWidth=2;
   x.fillRect(ox,oy,dw,dh); x.strokeRect(ox,oy,dw,dh);
-  // 固定垂直距离线：皇帝位只能沿此线左右移动（dist=用户→电视正中心，由输入框固定）
   x.strokeStyle='rgba(245,200,66,.25)'; x.setLineDash([3,4]); x.beginPath(); x.moveTo(ox, PY(dist)); x.lineTo(ox+dw, PY(dist)); x.stroke(); x.setLineDash([]);
   x.fillStyle='rgba(94,156,255,.22)'; x.fillRect(PX(-tvW/2), oy+2, tvW/roomW*dw, 4);
   x.fillStyle='#6f7d96'; x.font='12px sans-serif'; x.textAlign='center';
@@ -942,7 +892,7 @@ function renderDelayManual(){
   DELAY_CHANNELS[sys].forEach(c=>{
     if(delayManualState[c]==null || delayManualState[c]<0) delayManualState[c]=0;
     const auto=currentDelays;
-    const total=auto[c]+delayManualState[c];   // 滑块初始=总延迟(联动基线+手动)
+    const total=auto[c]+delayManualState[c];
     const div=document.createElement('div');
     div.className='slider';
     div.innerHTML='<div class="lab"><span>'+CH_LABEL[c]+' 延时 ('+c+')</span><span class="val" id="dV_'+c+'">'+total.toFixed(2)+' ms</span></div>'+
@@ -950,7 +900,6 @@ function renderDelayManual(){
     wrap.appendChild(div);
     const inp=div.querySelector('input');
     inp.addEventListener('input', ()=>{
-      // 滑块=总延迟；手动微调=总延迟−联动基线(自动基线)，只能往大调(>=0)
       const a=(currentDelays[c]||0);
       delayManualState[c]=Math.max(0, +inp.value - a);
       const lbl=document.getElementById('dV_'+c);
@@ -964,10 +913,10 @@ function renderDelayReadout(){
   const chans=(sys==='tv')?DELAY_CHANNELS.tv:[];
   const auto=currentDelays;
   chans.forEach(c=>{
-    const total=auto[c]+(delayManualState[c]||0);   // 总延迟=联动基线+手动微调
+    const total=auto[c]+(delayManualState[c]||0);
     const lbl=document.getElementById('dV_'+c);
     const inp=document.getElementById('d_'+c);
-    if(inp){  // 滑块实时联动：左端对齐自动基线，位置=总延迟（随平面图左右拖动变化）
+    if(inp){
       inp.min=auto[c].toFixed(2);
       inp.max=(auto[c]+10).toFixed(2);
       inp.value=total.toFixed(2);
@@ -984,7 +933,6 @@ function renderDelayReadout(){
 function clampDelayGeom(){
   const Lv=Math.max(0.1,+L_.value||3.1);
   const Wv=Math.max(0.1,+W_.value||4.4);
-  // 聆听距离不能大于房间长度(进深 L)
   let d=+dist_.value;
   if(!isFinite(d)||d<=0) d=0.1;
   if(d>Lv){
@@ -993,7 +941,6 @@ function clampDelayGeom(){
   }else if(delayErr_){
     delayErr_.textContent='';
   }
-  // 水平偏移不能超出房间半宽
   let o=+offX_.value; if(!isFinite(o)) o=0;
   const maxO=Wv/2;
   if(o>maxO) offX_.value=maxO.toFixed(2);
@@ -1003,7 +950,6 @@ function onDelayInput(){
   clampDelayGeom();
   redrawCanvases();
   renderDelayReadout();
-  // 延时是独立功能，不联动 PEQ 开关
   api('/api/apply',{gen:genInputs(),bands:currentBands}).catch(()=>{});
   showMsg('已写入延时，点「应用」按钮重载',true);
   pendingBadge.style.display='inline';
@@ -1011,7 +957,6 @@ function onDelayInput(){
 function onBalanceInput(){
   const v=+balance_.value;
   balVal_.textContent = (v===0) ? '居中' : (v<0 ? '左偏 '+Math.abs(v)+'%' : '右偏 '+v+'%');
-  // 平衡独立功能，不联动 PEQ 开关
   api('/api/apply',{gen:genInputs(),bands:currentBands}).catch(()=>{});
   showMsg('已写入平衡，点「应用」按钮重载',true);
   pendingBadge.style.display='inline';
@@ -1019,7 +964,6 @@ function onBalanceInput(){
 function onSurroundDelayInput(){
   const v=+surroundDelay_.value;
   sdVal_.textContent=v.toFixed(1)+' ms';
-  // 环绕延时独立功能，不联动 PEQ 开关
   api('/api/apply',{gen:genInputs(),bands:currentBands}).catch(()=>{});
   showMsg('已写入环绕延时，点「应用」按钮重载',true);
   pendingBadge.style.display='inline';
@@ -1048,13 +992,11 @@ const toggle=document.getElementById('toggle'),statusBands=document.getElementBy
 let currentBands=[];
 let applyTimer=null;
 
-// 拖动滑块：实时写 peq_af.txt，但不触发重载。
-// 显示"有未应用的更改"提示，用户需点"应用"按钮才 kill ffmpeg 重载。
 [L_,W_,H_,sys_,low_,mid_,hi_].forEach(el=>el.addEventListener('input',()=>{
   lowV.textContent=(+low_.value).toFixed(1)+' dB';
   midV.textContent=(+mid_.value).toFixed(1)+' dB';
   hiV.textContent=(+hi_.value).toFixed(1)+' dB';
-  clampDelayGeom();  // L 改变时重新限制聆听距离不超过房间长度
+  clampDelayGeom();
   build();
   redrawCanvases();
   if(!toggle.classList.contains('on')){ toggle.className='toggle on'; statusBands.textContent='已开启'; }
@@ -1063,13 +1005,11 @@ let applyTimer=null;
   pendingBadge.style.display='inline';
 }));
 [L_,W_,H_,sys_,low_,mid_,hi_].forEach(el=>el.addEventListener('change',()=>{ build(); redrawCanvases(); }));
-// 切换系统类型时重建每声道微调滑块（tv 2.0 = FL/FR；5.1/2.1 后续开放），并重绘画布
 sys_.addEventListener('input',()=>{ renderDelayManual(); renderDelayReadout(); redrawCanvases(); });
 sys_.addEventListener('change',()=>{ renderDelayManual(); renderDelayReadout(); redrawCanvases(); });
 [delayOn_,tvW_,dist_,offX_,tvH_,earH_].forEach(el=>el.addEventListener('input',onDelayInput));
 balance_.addEventListener('input',onBalanceInput);
 surroundDelay_.addEventListener('input',onSurroundDelayInput);
-// 平面图：仅左右拖拽设 水平偏移(offX)；垂直距离(dist)为固定输入值，不随拖拽改变
 setupDrag(plan_, ([cx,cy])=>{
   const W=plan_.width,H=plan_.height,pad=38;
   const roomW=Math.max(0.1,(+W_.value)||4.4), roomD=Math.max(0.1,(+L_.value)||3.1);
@@ -1082,7 +1022,6 @@ setupDrag(plan_, ([cx,cy])=>{
   onDelayInput();
 });
 
-// 重载状态轮询：loading→"正在重载音效（TV端需要约50秒或手动重播立即生效）"，loaded→"新音效已生效"，error→显示错误
 let replayPolling=false;
 async function pollReplayStatus(){
   if(replayPolling) return;
@@ -1100,7 +1039,7 @@ async function pollReplayStatus(){
       }else if(r.status==='error'){
         replayStatus.innerHTML='<span style="color:#f85149">✗ '+(r.msg||'失败')+'</span>';
         break;
-      }else{ // idle
+      }else{
         replayStatus.textContent='';
         break;
       }
@@ -1109,8 +1048,6 @@ async function pollReplayStatus(){
   replayPolling=false;
 }
 
-// 双重 EQ 提醒轮询：检测到 Windows 客户端正在串流 NAS（服务端已烤音）时，
-// 提示该用户勿在 Windows 本地再开『空间大师 Win 版』，避免同一路声音被加两次 EQ。
 const eqWarn_=document.getElementById('eqWarn'), eqWarnMsg_=document.getElementById('eqWarnMsg');
 async function pollDoubleEq(){
   try{
@@ -1142,7 +1079,6 @@ toggle.onclick=async()=>{
   }
 };
 
-// ---------- Jellyfin 连接 + 应用 ----------
 const jfUrl=document.getElementById('jfUrl'), jfKey=document.getElementById('jfKey');
 const jfState=document.getElementById('jfState'), jfSave=document.getElementById('jfSave');
 const applyCurrentBtn=document.getElementById('applyCurrentBtn'), acMsg=document.getElementById('acMsg');
@@ -1166,7 +1102,6 @@ jfSave.onclick=async()=>{
 applyCurrentBtn.onclick=async()=>{
   acMsg.textContent='处理中…';
   try{
-    // 滑块已通过 /api/apply 写好 peq_af.txt，按钮只触发重播
     const r=await api('/api/replay',{});
     if(r.ok){
       acMsg.textContent='';
@@ -1246,11 +1181,8 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             data = {}
         if p == '/api/compute':
-            # 闭源引擎：原始输入 -> {bands, delays}。本端点不含公式。
             self._send(200, json.dumps(engine_runtime.compute(data)))
         elif p == '/api/apply':
-            # 滑块拖动用：只写 peq_af.txt，不触发重载。
-            # 用户需点"应用"按钮才 kill ffmpeg 重载（避免频繁拖滑块导致反复 kill）。
             bands = data.get('bands', [])
             if data.get('gen'):
                 write_gen(data['gen'])
@@ -1264,14 +1196,12 @@ class H(BaseHTTPRequestHandler):
             open(PEQ_AF, 'w').write('')
             self._send(200, json.dumps({"ok": True, "on": False}))
         elif p == '/api/off-current':
-            # 关闭 PEQ：清空曲线文件 + 触发重载（kill ffmpeg 回到透传）。
             open(PEQ_AF, 'w').write('')
             cfg = read_jellyfin_cfg()
             ok, m = trigger_replay(cfg)
             self._send(200, json.dumps({"ok": True, "on": False,
                                         "msg": "PEQ 已关闭，" + ("正在重载…" if ok else m)}))
         elif p == '/api/jf':
-            # 保存 Jellyfin 连接（地址 + API Key）
             cfg = read_jellyfin_cfg()
             if data.get('url') is not None:
                 cfg['url'] = data['url'].strip()
@@ -1280,7 +1210,6 @@ class H(BaseHTTPRequestHandler):
             write_jellyfin_cfg(cfg)
             self._send(200, json.dumps({"ok": True}))
         elif p == '/api/apply-current':
-            # PEQ 开启用：写文件 + 触发重载（kill ffmpeg 用新 EQ 重转码）。
             bands = data.get('bands', [])
             if data.get('gen'):
                 write_gen(data['gen'])
@@ -1295,7 +1224,6 @@ class H(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"ok": True,
                                         "msg": "参数已写入，" + ("正在重载…" if ok else m)}))
         elif p == '/api/replay':
-            # "应用"按钮用：文件已由滑块写好，只触发重载（kill ffmpeg）。
             cfg = read_jellyfin_cfg()
             ok, m = trigger_replay(cfg)
             self._send(200, json.dumps({"ok": ok, "msg": m if not ok else "已触发重载"}))
@@ -1310,3 +1238,4 @@ if __name__ == "__main__":
     print(f"空间大师统一控制台已启动: http://0.0.0.0:{PORT}")
     print("[replay] 按钮触发模式：拖滑块只写文件不重载，点'应用'按钮才 kill ffmpeg 强制重载")
     HTTPServer(("0.0.0.0", PORT), H).serve_forever()
+

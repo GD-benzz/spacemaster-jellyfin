@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 空间大师 · 开放运行时垫片（OPEN SOURCE，可进公开 git）
 ===================================================================
@@ -16,7 +15,6 @@ import json
 import subprocess
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-# 搜索顺序：① 同目录 ② 宿主卷(/opt/spacemaster，与 NAS 控制台/容器共享) ③ 镜像内置路径
 _ENGINE_CANDIDATES = [
     os.path.join(_HERE, "sm_dsp_engine"),
     "/opt/spacemaster/sm_dsp_engine",
@@ -30,7 +28,7 @@ def _engine():
         if os.path.isfile(cand) and os.access(cand, os.X_OK):
             return "bin", cand
     try:
-        import engine_core  # 开发期源码（gitignored，不进公开仓）
+        import engine_core
         return "py", engine_core
     except Exception:
         return None, None
@@ -76,3 +74,4 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) >= 2 and sys.argv[1] == "compute":
         print(json.dumps(compute(json.loads(sys.argv[2])), ensure_ascii=False, indent=2))
+
