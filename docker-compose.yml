@@ -1,0 +1,31 @@
+# 空间大师 · Jellyfin 部署（开源集成层）
+# 用法：
+#   docker compose up -d --build
+#
+# 重要：sm_dsp_engine 闭源二进制不在此仓。两种供给方式（见 Dockerfile 注释）：
+#   1) 构建时拉取：docker compose build --build-arg SM_ENGINE_URL=<地址>
+#   2) 宿主卷提供：把 sm_dsp_engine 放到宿主 /opt/spacemaster/（下方 volumes 已挂载）
+#
+# 控制台(peq_toggle_nas.py) 跑在【宿主】systemd，不在此容器，见 开源说明.md。
+
+services:
+  jellyfin-sm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 可选：填闭源二进制下载地址，构建时烤入镜像。留空则靠宿主卷。
+        SM_ENGINE_URL: ""
+    container_name: jellyfin-sm
+    restart: unless-stopped
+    ports:
+      - "8096:8096"          # Jellyfin 主端口（生产前可再套一层反代，见文档）
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      # 宿主 /opt/spacemaster：控制台写的 EQ/延时/平衡配置文件 + 可选 sm_dsp_engine 二进制
+      - /opt/spacemaster:/opt/spacemaster
+    environment:
+      # 下混模式：0=电视保留多声道只注EQ; 1=pan下混立体声; 2=真实2.1
+      - SM_DOWNMIX=1
+      # 其它 SM_* 参数可用 /opt/spacemaster/downmix.env 覆盖，无需重建镜像
