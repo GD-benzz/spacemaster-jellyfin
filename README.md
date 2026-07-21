@@ -67,18 +67,20 @@ git clone https://github.com/GD-benzz/spacemaster-jellyfin.git
 cd spacemaster-jellyfin
 ```
 
-**2. Start Jellyfin + the correction wrapper** (pulls the prebuilt public image; the engine binary is already inside)
+**2. Pull official Jellyfin and fetch the SpaceMaster engine** (the engine ships in a tiny public image — no manual file transfer)
+
+```bash
+docker pull jellyfin/jellyfin:latest
+sudo mkdir -p /opt/spacemaster
+sudo docker run --rm -v /opt/spacemaster:/out \
+  ghcr.io/gd-benzz/spacemaster-engine:latest \
+  sh -c 'cp /spacemaster/* /out/ && chmod +x /out/sm_dsp_engine /out/setup.sh'
+```
+
+**3. Start Jellyfin + the correction wrapper**
 
 ```bash
 docker compose up -d
-```
-
-**3. Give the host console the engine binary** (extract it from the image you just pulled — nothing to download separately)
-
-```bash
-sudo mkdir -p /opt/spacemaster
-sudo docker cp jellyfin-sm:/usr/local/bin/sm_dsp_engine /opt/spacemaster/sm_dsp_engine
-sudo chmod +x /opt/spacemaster/sm_dsp_engine
 ```
 
 **4. Set up the web console** (host, systemd)
@@ -95,21 +97,21 @@ Open `http://<HOST_IP>:8777`, enter your room dimensions, adjust the sliders, an
 
 > If the engine binary is missing, nothing crashes: the wrapper **passes audio through untouched** (no correction) and the console reports the engine is unavailable.
 
-### For maintainers — build & publish the image
+### For maintainers — build & publish the engine image
 
-You build the image **once** with the engine baked in, push it to a public registry, and end users just `docker compose up`. You never hand-deliver a binary.
+You compile the engine **once** (native binary, not cross-platform) and bake it into a **tiny public image**. End users pull the **official** `jellyfin/jellyfin` themselves and fetch your engine image to get the binary — you never hand-deliver a file.
 
 ```bash
 # 1. Compile the engine on a Linux x86_64 host (Nuitka output is NOT cross-platform):
 #    bash build_engine.sh
 #    -> produces ./sm_dsp_engine (native machine code, not Python bytecode)
 
-# 2. Build the image (Dockerfile auto-copies ./sm_dsp_engine into the image):
-docker build -t ghcr.io/gd-benzz/spacemaster-jellyfin:latest .
+# 2. Build the tiny engine image (Dockerfile copies ./sm_dsp_engine in):
+docker build -t ghcr.io/gd-benzz/spacemaster-engine:latest .
 
 # 3. Log in to GHCR and push (make the package public in GitHub settings afterwards):
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u GD-benzz --password-stdin
-docker push ghcr.io/gd-benzz/spacemaster-jellyfin:latest
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u gd-benzz --password-stdin
+docker push ghcr.io/gd-benzz/spacemaster-engine:latest
 ```
 
 > The image name must be lowercase: `ghcr.io/gd-benzz/...`.
@@ -176,18 +178,20 @@ git clone https://github.com/GD-benzz/spacemaster-jellyfin.git
 cd spacemaster-jellyfin
 ```
 
-**2. 启动 Jellyfin + 校正薄壳**（自动拉取预构建公开镜像，引擎二进制已在镜像内）
+**2. 拉取官方 Jellyfin 并取回空间大师引擎**（引擎随一个 tiny 公开镜像分发，无需手动传文件）
+
+```bash
+docker pull jellyfin/jellyfin:latest
+sudo mkdir -p /opt/spacemaster
+sudo docker run --rm -v /opt/spacemaster:/out \
+  ghcr.io/gd-benzz/spacemaster-engine:latest \
+  sh -c 'cp /spacemaster/* /out/ && chmod +x /out/sm_dsp_engine /out/setup.sh'
+```
+
+**3. 启动 Jellyfin + 校正薄壳**
 
 ```bash
 docker compose up -d
-```
-
-**3. 把引擎二进制交给宿主控制台**（从刚拉下来的镜像里抠出来，无需另外下载）
-
-```bash
-sudo mkdir -p /opt/spacemaster
-sudo docker cp jellyfin-sm:/usr/local/bin/sm_dsp_engine /opt/spacemaster/sm_dsp_engine
-sudo chmod +x /opt/spacemaster/sm_dsp_engine
 ```
 
 **4. 部署网页控制台**（宿主机，systemd）
@@ -204,21 +208,21 @@ sudo systemctl daemon-reload && sudo systemctl enable --now peq-console.service
 
 > 缺引擎二进制也不会崩：薄壳会**原样透传音频**（不校正），控制台提示引擎不可用。
 
-### 维护者——构建并发布镜像
+### 维护者——构建并发布引擎镜像
 
-你只需**构建一次**（把引擎烤进镜像），推到公开镜像仓库，终端用户 `docker compose up` 即可。你永远不用手动发二进制。
+你只需**编译一次**引擎（原生二进制，不跨平台），把它烤进一个**tiny 公开镜像**。终端用户自己 `docker pull jellyfin/jellyfin`，再用你的引擎镜像把二进制取回本机——你永远不用手动发文件。
 
 ```bash
 # 1. 在 Linux x86_64 主机上编译引擎（Nuitka 产物不跨平台）：
 #    bash build_engine.sh
 #    -> 生成 ./sm_dsp_engine（原生机器码，已非 Python 字节码，反编译难度高）
 
-# 2. 构建镜像（Dockerfile 会自动把 ./sm_dsp_engine 烤进镜像）：
-docker build -t ghcr.io/gd-benzz/spacemaster-jellyfin:latest .
+# 2. 构建 tiny 引擎镜像（Dockerfile 会自动把 ./sm_dsp_engine 烤进镜像）：
+docker build -t ghcr.io/gd-benzz/spacemaster-engine:latest .
 
 # 3. 登录 GHCR 并推送（推完到 GitHub 里把该 package 设为 public）：
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u GD-benzz --password-stdin
-docker push ghcr.io/gd-benzz/spacemaster-jellyfin:latest
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u gd-benzz --password-stdin
+docker push ghcr.io/gd-benzz/spacemaster-engine:latest
 ```
 
 > 镜像名必须全小写：`ghcr.io/gd-benzz/...`。
@@ -231,7 +235,7 @@ docker push ghcr.io/gd-benzz/spacemaster-jellyfin:latest
 
 <div align="center">
 
-详细的架构与部署说明见 [`开源说明.md`](开源说明.md) 与 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
-See [`开源说明.md`](开源说明.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) for architecture & deployment details.
+详细的安装步骤见 [`安装指南.md`](安装指南.md)；架构与部署说明见 [`开源说明.md`](开源说明.md) 与 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+See [`安装指南.md`](安装指南.md) for step-by-step setup; [`开源说明.md`](开源说明.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) for architecture & deployment details.
 
 </div>
