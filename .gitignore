@@ -39,3 +39,16 @@ spacemaster-mpv-plugin/
 # 旧废弃目录 / 缓存
 _obsolete_*/
 __pycache__/
+
+# ===== NAS 运行态生成物 / 临时脚本（不进公开仓）=====
+# 这些是部署后在 NAS 上生成的脚本、测量数据、当前配置，含用户参数，勿随仓发布
+build_af_nas.py
+measure_loud.sh
+peq_af_nas.txt
+peq_nas.json
+downmix.env
+# docker-jellyfin/ 下的过时/重复文件（根 Dockerfile 才是 tiny 引擎镜像，下面这些不进仓）
+docker-jellyfin/Dockerfile
+docker-jellyfin/docker-compose.yml
+docker-jellyfin/measure_loud.sh
+docker-jellyfin/peq_af_off.txt
