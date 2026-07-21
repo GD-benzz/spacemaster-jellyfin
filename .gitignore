@@ -26,3 +26,10 @@ peq_toggle.py
 spacemaster_console.py
 peq_control.html
 spacemaster-mpv-plugin/
+
+# ===== 根目录旧厚壳 wrapper（含 pan/adelay 公式，已被 docker-jellyfin/sm_wrapper.sh 薄壳取代）=====
+# 注意：只忽略根目录这一份，不影响已提交的 docker-jellyfin/sm_wrapper.sh 薄壳
+/sm_wrapper.sh
+# 旧废弃目录 / 缓存
+_obsolete_*/
+__pycache__/
