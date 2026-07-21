@@ -115,6 +115,8 @@ docker push ghcr.io/gd-benzz/spacemaster-engine:latest
 ```
 
 > The image name must be lowercase: `ghcr.io/gd-benzz/...`.
+>
+> ⚠️ **The GitHub token used to log in must carry the `write:packages` scope.** A token with only `repo` is rejected with `denied: permission_denied: The token provided does not match expected scopes.` Generate a *classic* PAT at `github.com/settings/tokens`, tick **write:packages** (this also ticks `read:packages`). After pushing, set the package to **Public** in GitHub → Packages, or end users get a 403 on `docker pull`.
 
 ### Security note (honest)
 
@@ -226,6 +228,8 @@ docker push ghcr.io/gd-benzz/spacemaster-engine:latest
 ```
 
 > 镜像名必须全小写：`ghcr.io/gd-benzz/...`。
+>
+> ⚠️ **登录用的 GitHub Token 必须带 `write:packages` 权限**。只有 `repo` 权限的 token 会被拒：`denied: permission_denied: The token provided does not match expected scopes.`。在 `github.com/settings/tokens` 生成 **classic** PAT，勾选 **write:packages**（会自动连带 read:packages）。推完务必到 GitHub → Packages 把该包设为 **Public**，否则终端用户 `docker pull` 会 403。
 
 ### 安全说明（实话实说）
 
