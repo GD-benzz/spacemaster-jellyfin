@@ -1,0 +1,24 @@
+# 不要把这些送进 Docker 构建上下文 / keep these OUT of the build context
+# 注意：sm_dsp_engine 需要被 COPY 进镜像，故【不】在此排除。
+
+# 算法源码：绝不进镜像 / algorithm source: never into any image layer
+engine_core.py
+
+# git 与本地开发产物 / git & local dev artifacts
+.git
+.gitignore
+*.pyc
+__pycache__/
+
+# 运行期数据卷（体积大、无需进镜像）/ runtime volumes (large, not needed in image)
+config/
+cache/
+
+# 非 Jellyfin 产品副本 / non-Jellyfin product copies
+peq_toggle.py
+spacemaster_console.py
+peq_control.html
+spacemaster-mpv-plugin/
+
+# 文档（不必进镜像）/ docs (no need in image)
+*.md
